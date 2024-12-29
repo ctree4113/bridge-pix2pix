@@ -1,0 +1,84 @@
+model:
+  base_learning_rate: 5.0e-05
+  target: s_dsb.models.diffusion.bridge_edit.SDSBEdit
+  params:
+    num_timesteps: 1000
+    gamma_schedule: "linear"
+    gamma_min: 0.00085
+    gamma_max: 0.012
+    reparam_type: "flow"
+    use_ema: true
+    ema_decay: 0.9999
+    guidance_scale: 7.5
+    edit_threshold: 0.8
+    edit_strategy: "bidirectional"
+    progressive_steps: [200, 400, 600, 800]
+    memory_efficient: true
+
+    unet_config:
+      target: s_dsb.modules.diffusionmodules.s_dsb_unet.SDSBUNet
+      params:
+        image_size: 32
+        in_channels: 4
+        out_channels: 4
+        model_channels: 320
+        attention_resolutions: [4, 2, 1]
+        num_res_blocks: 2
+        channel_mult: [1, 2, 4, 4]
+        num_heads: 8
+        use_spatial_transformer: true
+        transformer_depth: 1
+        context_dim: 768
+        use_checkpoint: true
+        legacy: false
+
+    clip_config:
+      target: s_dsb.modules.encoders.modules.FrozenCLIPEmbedder
+
+    scheduler_config:
+      target: s_dsb.schedulers.lr_scheduler.LambdaLinearScheduler
+      params:
+        warm_up_steps: [1000]
+        cycle_lengths: [10000000000000]
+        f_start: [1.0e-06]
+        f_max: [1.0]
+        f_min: [1.0]
+
+data:
+  target: main.DataModuleFromConfig
+  params:
+    batch_size: 1
+    num_workers: 2
+    train:
+      target: data.magicbrush_dataset.MagicBrushDataset
+      params:
+        root_dir: data/magicbrush
+        split: train
+        min_resize_res: 256
+        max_resize_res: 256
+        crop_res: 256
+        flip_prob: 0.0
+    validation:
+      target: data.magicbrush_dataset.MagicBrushDataset
+      params:
+        root_dir: data/magicbrush
+        split: dev
+        min_resize_res: 256
+        max_resize_res: 256
+        crop_res: 256
+        flip_prob: 0.0
+
+lightning:
+  callbacks:
+    image_logger:
+      target: main.ImageLogger
+      params:
+        batch_frequency: 2000
+        max_images: 2
+        increase_log_steps: false
+
+  trainer:
+    benchmark: true
+    max_epochs: 2000
+    accumulate_grad_batches: 1
+    check_val_every_n_epoch: 4

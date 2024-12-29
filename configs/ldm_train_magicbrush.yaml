@@ -1,47 +1,43 @@
-# File modified by authors of InstructPix2Pix from original (https://github.com/CompVis/stable-diffusion).
-# See more details in LICENSE.
-
 model:
-  base_learning_rate: 1.0e-04
+  base_learning_rate: 5.0e-05
   target: ldm.models.diffusion.ddpm_edit.LatentDiffusion
   params:
+    ckpt_path: stable_diffusion/models/ldm/stable-diffusion-v1/v1-5-pruned-emaonly.ckpt
     linear_start: 0.00085
-    linear_end: 0.0120
+    linear_end: 0.012
     num_timesteps_cond: 1
     log_every_t: 200
     timesteps: 1000
     first_stage_key: edited
     cond_stage_key: edit
-    # image_size: 64
-    # image_size: 32
-    image_size: 16
+    image_size: 32
     channels: 4
-    cond_stage_trainable: false   # Note: different from the one we trained before
+    cond_stage_trainable: false
     conditioning_key: hybrid
     monitor: val/loss_simple_ema
     scale_factor: 0.18215
     use_ema: true
     load_ema: true
 
-    scheduler_config: # 10000 warmup steps
+    scheduler_config:
       target: ldm.lr_scheduler.LambdaLinearScheduler
       params:
-        warm_up_steps: [ 0 ]
-        cycle_lengths: [ 10000000000000 ] # incredibly large number to prevent corner cases
-        f_start: [ 1.e-6 ]
-        f_max: [ 1. ]
-        f_min: [ 1. ]
+        warm_up_steps: [1000]
+        cycle_lengths: [10000000000000]
+        f_start: [1.0e-06]
+        f_max: [1.0]
+        f_min: [1.0]
 
     unet_config:
       target: ldm.modules.diffusionmodules.openaimodel.UNetModel
       params:
-        image_size: 32 # unused
+        image_size: 32
         in_channels: 8
         out_channels: 4
         model_channels: 320
-        attention_resolutions: [ 4, 2, 1 ]
+        attention_resolutions: [4, 2, 1]
         num_res_blocks: 2
-        channel_mult: [ 1, 2, 4, 4 ]
+        channel_mult: [1, 2, 4, 4]
         num_heads: 8
         use_spatial_transformer: True
         transformer_depth: 1
@@ -78,22 +74,38 @@ model:
 data:
   target: main.DataModuleFromConfig
   params:
-    batch_size: 128
-    num_workers: 1
-    wrap: false
-    validation:
-      target: edit_dataset.EditDataset
+    batch_size: 1
+    num_workers: 2
+    train:
+      target: data.magicbrush_dataset.MagicBrushDataset
       params:
-        path: data/clip-filtered-dataset
-        cache_dir:  data/
-        cache_name: data_10k
-        split: val
-        min_text_sim: 0.2
-        min_image_sim: 0.75
-        min_direction_sim: 0.2
-        max_samples_per_prompt: 1
-        min_resize_res: 512
-        max_resize_res: 512
-        crop_res: 512
-        output_as_edit: False
-        real_input: True
+        root_dir: data/magicbrush
+        split: train
+        min_resize_res: 256
+        max_resize_res: 256
+        crop_res: 256
+        flip_prob: 0.0
+    validation:
+      target: data.magicbrush_dataset.MagicBrushDataset
+      params:
+        root_dir: data/magicbrush
+        split: dev
+        min_resize_res: 256
+        max_resize_res: 256
+        crop_res: 256
+        flip_prob: 0.0
+
+lightning:
+  callbacks:
+    image_logger:
+      target: main.ImageLogger
+      params:
+        batch_frequency: 2000
+        max_images: 2
+        increase_log_steps: False
+
+  trainer:
+    benchmark: True
+    max_epochs: 2000
+    accumulate_grad_batches: 1
+    check_val_every_n_epoch: 4
