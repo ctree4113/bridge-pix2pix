@@ -1,0 +1,317 @@
+{
+  "builder_name": "parquet",
+  "citation": "",
+  "config_name": "default",
+  "dataset_name": "magic_brush",
+  "dataset_size": 27131848093,
+  "description": "",
+  "download_checksums": {
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00000-of-00051-9fd9f23e2b1cb397.parquet": {
+      "num_bytes": 506317755,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00001-of-00051-7fc041c6c75c7a1b.parquet": {
+      "num_bytes": 492635194,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00002-of-00051-4683be833ed06f1c.parquet": {
+      "num_bytes": 479917226,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00003-of-00051-dbbf01b8d4790783.parquet": {
+      "num_bytes": 533303872,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00004-of-00051-d373bd832c322236.parquet": {
+      "num_bytes": 491358829,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00005-of-00051-261c379dee1873a0.parquet": {
+      "num_bytes": 498193170,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00006-of-00051-1601e4998b870515.parquet": {
+      "num_bytes": 494441590,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00007-of-00051-097905247104899b.parquet": {
+      "num_bytes": 505484290,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00008-of-00051-45475d9537033a27.parquet": {
+      "num_bytes": 527588931,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00009-of-00051-cf6ff6a53b3552a6.parquet": {
+      "num_bytes": 511902487,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00010-of-00051-d73c61985d708102.parquet": {
+      "num_bytes": 521617447,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00011-of-00051-8b4c59c53a36a8bb.parquet": {
+      "num_bytes": 481362522,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00012-of-00051-7a326334a53d22a3.parquet": {
+      "num_bytes": 499868286,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00013-of-00051-7a32a843bae55f17.parquet": {
+      "num_bytes": 494319295,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00014-of-00051-34fbf4e78f18f540.parquet": {
+      "num_bytes": 498830010,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00015-of-00051-b0616f1aa69cc303.parquet": {
+      "num_bytes": 503315236,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00016-of-00051-2ce592a2aa4c0b2d.parquet": {
+      "num_bytes": 518998890,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00017-of-00051-29b16824f54f172d.parquet": {
+      "num_bytes": 504053031,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00018-of-00051-b8a3cc2bebe485c7.parquet": {
+      "num_bytes": 491254737,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00019-of-00051-7496aa939d5aaf12.parquet": {
+      "num_bytes": 530035883,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00020-of-00051-0e4f76bd7de39d68.parquet": {
+      "num_bytes": 519521819,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00021-of-00051-aea46908b3d257d7.parquet": {
+      "num_bytes": 491542741,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00022-of-00051-3a7846cdc795c3a8.parquet": {
+      "num_bytes": 511383934,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00023-of-00051-581ce36816474c33.parquet": {
+      "num_bytes": 489856629,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00024-of-00051-63f85f8694db99da.parquet": {
+      "num_bytes": 508595900,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00025-of-00051-eb6b4b387abb3bf6.parquet": {
+      "num_bytes": 500048779,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00026-of-00051-a37258445ad77cdd.parquet": {
+      "num_bytes": 503252505,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00027-of-00051-0c3caef58833e30b.parquet": {
+      "num_bytes": 486531758,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00028-of-00051-a864102cdd7e0dd0.parquet": {
+      "num_bytes": 519422244,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00029-of-00051-d4b5816a0785e257.parquet": {
+      "num_bytes": 492960419,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00030-of-00051-d57316916f4cce1f.parquet": {
+      "num_bytes": 510970873,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00031-of-00051-baa9fa3e29dfb87c.parquet": {
+      "num_bytes": 488755667,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00032-of-00051-cfc5f479ca56251a.parquet": {
+      "num_bytes": 515158841,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00033-of-00051-80e659de48bfed44.parquet": {
+      "num_bytes": 515352795,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00034-of-00051-d5a8a32783d7b749.parquet": {
+      "num_bytes": 499729779,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00035-of-00051-6df799054d7c060c.parquet": {
+      "num_bytes": 491578381,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00036-of-00051-3c85ce9e4996c78b.parquet": {
+      "num_bytes": 489165715,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00037-of-00051-24003f9a1733a271.parquet": {
+      "num_bytes": 500856822,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00038-of-00051-a035b244c8b6e231.parquet": {
+      "num_bytes": 494499749,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00039-of-00051-0a94fb0d0e1e35f8.parquet": {
+      "num_bytes": 507585033,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00040-of-00051-3770c96bedf6c3fa.parquet": {
+      "num_bytes": 498512442,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00041-of-00051-45bf2e581124371a.parquet": {
+      "num_bytes": 488530321,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00042-of-00051-494734a9b0704ee9.parquet": {
+      "num_bytes": 506468399,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00043-of-00051-340358803f36555c.parquet": {
+      "num_bytes": 485244258,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00044-of-00051-12cc4bb9cdfcfd54.parquet": {
+      "num_bytes": 497751193,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00045-of-00051-ac7a4fc63484f54c.parquet": {
+      "num_bytes": 495358329,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00046-of-00051-caf11c5fbe9bb110.parquet": {
+      "num_bytes": 522745832,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00047-of-00051-a99476a212efcb35.parquet": {
+      "num_bytes": 494453732,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00048-of-00051-9aa83b8e4abb3e92.parquet": {
+      "num_bytes": 480902279,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00049-of-00051-e24aa47c28573c94.parquet": {
+      "num_bytes": 514101392,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/train-00050-of-00051-7a5506bb37822b16.parquet": {
+      "num_bytes": 500059400,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/dev-00000-of-00004-f147d414270a90e1.parquet": {
+      "num_bytes": 386600303,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/dev-00001-of-00004-8ef3de1dc8cb8a6a.parquet": {
+      "num_bytes": 380075567,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/dev-00002-of-00004-54c4d7b0a9e49db5.parquet": {
+      "num_bytes": 374135399,
+      "checksum": null
+    },
+    "hf://datasets/osunlp/MagicBrush@1d8d4629150d18ca50afab66391866f2085be989/data/dev-00003-of-00004-384b81a61c93b7e3.parquet": {
+      "num_bytes": 380360178,
+      "checksum": null
+    }
+  },
+  "download_size": 27126868088,
+  "features": {
+    "img_id": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "turn_index": {
+      "dtype": "int32",
+      "_type": "Value"
+    },
+    "source_img": {
+      "_type": "Image"
+    },
+    "mask_img": {
+      "_type": "Image"
+    },
+    "instruction": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "target_img": {
+      "_type": "Image"
+    }
+  },
+  "homepage": "",
+  "license": "",
+  "size_in_bytes": 54258716181,
+  "splits": {
+    "train": {
+      "name": "train",
+      "num_bytes": 25610631948,
+      "num_examples": 8807,
+      "shard_lengths": [
+        173,
+        346,
+        173,
+        273,
+        246,
+        173,
+        173,
+        173,
+        173,
+        346,
+        346,
+        173,
+        173,
+        173,
+        346,
+        173,
+        346,
+        346,
+        173,
+        173,
+        346,
+        346,
+        346,
+        173,
+        345,
+        344,
+        344,
+        344,
+        172,
+        344,
+        344,
+        344,
+        172,
+        172
+      ],
+      "dataset_name": "magic_brush"
+    },
+    "dev": {
+      "name": "dev",
+      "num_bytes": 1521216145,
+      "num_examples": 528,
+      "shard_lengths": [
+        232,
+        296
+      ],
+      "dataset_name": "magic_brush"
+    }
+  },
+  "version": {
+    "version_str": "0.0.0",
+    "major": 0,
+    "minor": 0,
+    "patch": 0
+  }
+}
