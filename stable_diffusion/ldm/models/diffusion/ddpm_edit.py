@@ -120,10 +120,11 @@ class DDPM(pl.LightningModule):
         self.loss_type = loss_type
 
         self.learn_logvar = learn_logvar
-        self.logvar = torch.full(fill_value=logvar_init, size=(self.num_timesteps,))
-        if self.learn_logvar:
-            self.logvar = nn.Parameter(self.logvar, requires_grad=True)
-
+        logvar = torch.full(fill_value=logvar_init, size=(timesteps,))
+        if learn_logvar:
+            self.logvar = nn.Parameter(logvar)
+        else:
+            self.register_buffer('logvar', logvar)
 
     def register_schedule(self, given_betas=None, beta_schedule="linear", timesteps=1000,
                           linear_start=1e-4, linear_end=2e-2, cosine_s=8e-3):
@@ -200,6 +201,10 @@ class DDPM(pl.LightningModule):
             sd = sd["state_dict"]
         keys = list(sd.keys())
 
+        # 添加 logvar 到 ignore_keys
+        if not self.learn_logvar:
+            ignore_keys = ignore_keys + ["logvar"]
+
         # Our model adds additional channels to the first layer to condition on an input image.
         # For the first layer, copy existing channel weights and initialize new channel weights to zero.
         input_keys = [
@@ -213,12 +218,11 @@ class DDPM(pl.LightningModule):
                 continue
 
             input_weight = self_sd[input_key]
-
             if input_weight.size() != sd[input_key].size():
                 print(f"Manual init: {input_key}")
                 input_weight.zero_()
                 input_weight[:, :4, :, :].copy_(sd[input_key])
-                ignore_keys.append(input_key)
+                sd[input_key] = input_weight
 
         for k in keys:
             for ik in ignore_keys:
@@ -323,32 +327,42 @@ class DDPM(pl.LightningModule):
 
         return loss
 
-    def p_losses(self, x_start, t, noise=None):
+    def p_losses(self, x_start, cond, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
+        
+        # 确保 t 在正确的设备上
+        t = t.to(x_start.device)
+        
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
-        model_out = self.model(x_noisy, t)
+        model_output = self.model(x_noisy, t, cond)
 
         loss_dict = {}
-        if self.parameterization == "eps":
-            target = noise
-        elif self.parameterization == "x0":
+        prefix = 'train' if self.training else 'val'
+
+        if self.parameterization == "x0":
             target = x_start
+        elif self.parameterization == "eps":
+            target = noise
         else:
-            raise NotImplementedError(f"Paramterization {self.parameterization} not yet supported")
+            raise NotImplementedError()
 
-        loss = self.get_loss(model_out, target, mean=False).mean(dim=[1, 2, 3])
+        loss_simple = self.get_loss(model_output, target, mean=False).mean([1, 2, 3])
+        loss_dict.update({f'{prefix}/loss_simple': loss_simple.mean()})
 
-        log_prefix = 'train' if self.training else 'val'
+        logvar_t = self.logvar[t]  # 现在 logvar 已经在正确的设备上
+        loss = loss_simple / torch.exp(logvar_t) + logvar_t
+        
+        if self.learn_logvar:
+            loss_dict.update({f'{prefix}/loss_gamma': loss.mean()})
+            loss_dict.update({'logvar': self.logvar.data.mean()})
 
-        loss_dict.update({f'{log_prefix}/loss_simple': loss.mean()})
-        loss_simple = loss.mean() * self.l_simple_weight
+        loss = self.l_simple_weight * loss.mean()
 
-        loss_vlb = (self.lvlb_weights[t] * loss).mean()
-        loss_dict.update({f'{log_prefix}/loss_vlb': loss_vlb})
-
-        loss = loss_simple + self.original_elbo_weight * loss_vlb
-
-        loss_dict.update({f'{log_prefix}/loss': loss})
+        loss_vlb = self.get_loss(model_output, target, mean=False).mean(dim=(1, 2, 3))
+        loss_vlb = (self.lvlb_weights[t] * loss_vlb).mean()
+        loss_dict.update({f'{prefix}/loss_vlb': loss_vlb})
+        loss += (self.original_elbo_weight * loss_vlb)
+        loss_dict.update({f'{prefix}/loss': loss})
 
         return loss, loss_dict
 
@@ -581,17 +595,37 @@ class LatentDiffusion(DDPM):
         return self.scale_factor * z
 
     def get_learned_conditioning(self, c):
-        if self.cond_stage_forward is None:
-            if hasattr(self.cond_stage_model, 'encode') and callable(self.cond_stage_model.encode):
-                c = self.cond_stage_model.encode(c)
-                if isinstance(c, DiagonalGaussianDistribution):
-                    c = c.mode()
+        """
+        处理条件信息
+        Args:
+            c: 条件信息,可能是字符串或字典
+        """
+        if isinstance(c, dict):
+            # 处理混合条件
+            c_concat = c.get("c_concat", [])
+            c_crossattn = c.get("c_crossattn", "")
+            
+            # 处理空间条件
+            if len(c_concat) > 0:
+                c_concat = c_concat[0]  # 取第一个元素
             else:
-                c = self.cond_stage_model(c)
+                c_concat = None
+            
+            # 处理文本条件
+            if c_crossattn:
+                if isinstance(c_crossattn, list):
+                    c_crossattn = c_crossattn[0]  # 如果是列表,取第一个元素
+                c_crossattn = self.cond_stage_model.encode(c_crossattn)
+            else:
+                c_crossattn = None
+            
+            return {
+                "c_concat": [c_concat] if c_concat is not None else [],
+                "c_crossattn": [c_crossattn] if c_crossattn is not None else []
+            }
         else:
-            assert hasattr(self.cond_stage_model, self.cond_stage_forward)
-            c = getattr(self.cond_stage_model, self.cond_stage_forward)(c)
-        return c
+            # 处理单一条件
+            return self.cond_stage_model.encode(c)
 
     def meshgrid(self, h, w):
         y = torch.arange(0, h).view(h, 1, 1).repeat(1, w, 1)
@@ -702,7 +736,6 @@ class LatentDiffusion(DDPM):
         random = torch.rand(x.size(0), device=x.device)
         prompt_mask = rearrange(random < 2 * uncond, "n -> n 1 1")
         input_mask = 1 - rearrange((random >= uncond).float() * (random < 3 * uncond).float(), "n -> n 1 1 1")
-
         null_prompt = self.get_learned_conditioning([""])
         cond["c_crossattn"] = [torch.where(prompt_mask, null_prompt, self.get_learned_conditioning(xc["c_crossattn"]).detach())]
         cond["c_concat"] = [input_mask * self.encode_first_stage((xc["c_concat"].to(self.device))).mode().detach()]
@@ -1024,8 +1057,12 @@ class LatentDiffusion(DDPM):
 
     def p_losses(self, x_start, cond, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
+        
+        # 确保 t 在正确的设备上
+        t = t.to(x_start.device)
+        
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
-        model_output = self.apply_model(x_noisy, t, cond)
+        model_output = self.model(x_noisy, t, cond)
 
         loss_dict = {}
         prefix = 'train' if self.training else 'val'
@@ -1040,9 +1077,9 @@ class LatentDiffusion(DDPM):
         loss_simple = self.get_loss(model_output, target, mean=False).mean([1, 2, 3])
         loss_dict.update({f'{prefix}/loss_simple': loss_simple.mean()})
 
-        logvar_t = self.logvar[t].to(self.device)
+        logvar_t = self.logvar[t]  # 现在 logvar 已经在正确的设备上
         loss = loss_simple / torch.exp(logvar_t) + logvar_t
-        # loss = loss_simple / torch.exp(self.logvar) + self.logvar
+        
         if self.learn_logvar:
             loss_dict.update({f'{prefix}/loss_gamma': loss.mean()})
             loss_dict.update({'logvar': self.logvar.data.mean()})
@@ -1143,7 +1180,6 @@ class LatentDiffusion(DDPM):
                 list(map(lambda x: x[:batch_size], cond[key])) for key in cond}
             else:
                 cond = [c[:batch_size] for c in cond] if isinstance(cond, list) else cond[:batch_size]
-
         if start_T is not None:
             timesteps = min(timesteps, start_T)
         iterator = tqdm(reversed(range(0, timesteps)), desc='Progressive Generation',
@@ -1412,23 +1448,76 @@ class DiffusionWrapper(pl.LightningModule):
         self.diffusion_model = instantiate_from_config(diff_model_config)
         self.conditioning_key = conditioning_key
         assert self.conditioning_key in [None, 'concat', 'crossattn', 'hybrid', 'adm']
+        
+        # 从配置中获取context_dim
+        self.context_dim = diff_model_config.params.get('context_dim', 768)
 
     def forward(self, x, t, c_concat: list = None, c_crossattn: list = None):
         if self.conditioning_key is None:
             out = self.diffusion_model(x, t)
         elif self.conditioning_key == 'concat':
-            xc = torch.cat([x] + c_concat, dim=1)
+            # 处理c_concat
+            if c_concat is None:
+                xc = x
+            else:
+                # 确保c_concat是list
+                if not isinstance(c_concat, list):
+                    if isinstance(c_concat, dict):
+                        c_concat = [c_concat["c_concat"]]
+                    else:
+                        c_concat = [c_concat]
+                # 取第一个元素并确保是tensor
+                c_concat_tensor = c_concat[0]
+                if isinstance(c_concat_tensor, list):
+                    c_concat_tensor = c_concat_tensor[0]
+                xc = torch.cat([x, c_concat_tensor], dim=1)
             out = self.diffusion_model(xc, t)
         elif self.conditioning_key == 'crossattn':
-            cc = torch.cat(c_crossattn, 1)
-            out = self.diffusion_model(x, t, context=cc)
+            # 处理c_crossattn
+            if c_crossattn is None or len(c_crossattn) == 0:
+                # 如果没有cross attention条件,使用空的context
+                context = torch.zeros((x.shape[0], 1, self.context_dim), device=x.device)
+            else:
+                # 确保c_crossattn是list
+                if not isinstance(c_crossattn, list):
+                    c_crossattn = [c_crossattn]
+                context = torch.cat(c_crossattn, 1)
+            out = self.diffusion_model(x, t, context=context)
         elif self.conditioning_key == 'hybrid':
-            xc = torch.cat([x] + c_concat, dim=1)
-            cc = torch.cat(c_crossattn, 1)
-            out = self.diffusion_model(xc, t, context=cc)
+            # 处理c_concat
+            if c_concat is None:
+                xc = x
+            else:
+                # 确保c_concat是list
+                if not isinstance(c_concat, list):
+                    if isinstance(c_concat, dict):
+                        c_concat = [c_concat["c_concat"]]
+                    else:
+                        c_concat = [c_concat]
+                # 取第一个元素并确保是tensor
+                c_concat_tensor = c_concat[0]
+                if isinstance(c_concat_tensor, list):
+                    c_concat_tensor = c_concat_tensor[0]
+                xc = torch.cat([x, c_concat_tensor], dim=1)
+            
+            # 处理c_crossattn
+            if c_crossattn is None or len(c_crossattn) == 0:
+                # 如果没有cross attention条件,使用空的context
+                context = torch.zeros((x.shape[0], 1, self.context_dim), device=x.device)
+            else:
+                # 确保c_crossattn是list
+                if not isinstance(c_crossattn, list):
+                    c_crossattn = [c_crossattn]
+                context = torch.cat(c_crossattn, 1)
+            out = self.diffusion_model(xc, t, context=context)
         elif self.conditioning_key == 'adm':
-            cc = c_crossattn[0]
-            out = self.diffusion_model(x, t, y=cc)
+            # 处理c_crossattn
+            if c_crossattn is None or len(c_crossattn) == 0:
+                # 如果没有cross attention条件,使用空的context
+                context = torch.zeros((x.shape[0], 1), device=x.device)
+            else:
+                context = c_crossattn[0]
+            out = self.diffusion_model(x, t, y=context)
         else:
             raise NotImplementedError()
 
@@ -1457,3 +1546,6 @@ class Layout2ImgDiffusion(LatentDiffusion):
         cond_img = torch.stack(bbox_imgs, dim=0)
         logs['bbox_image'] = cond_img
         return logs
+
+def clamp(x, min_val, max_val):
+    return torch.clamp(x, min_val, max_val)
