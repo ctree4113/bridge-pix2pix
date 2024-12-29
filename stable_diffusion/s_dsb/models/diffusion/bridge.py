@@ -221,15 +221,16 @@ class SDSB(pl.LightningModule):
         
     def configure_optimizers(self):
         """配置优化器"""
-        opt_forward = torch.optim.AdamW(
-            self.forward_model.parameters(),
-            lr=self.learning_rate
+        # 根据GPU数量缩放学习率
+        world_size = self.trainer.world_size if self.trainer else 1
+        scaled_lr = self.learning_rate * world_size
+        
+        optimizer = torch.optim.AdamW(
+            self.parameters(),
+            lr=scaled_lr,
+            betas=(0.9, 0.999)
         )
-        opt_backward = torch.optim.AdamW(
-            self.backward_model.parameters(),
-            lr=self.learning_rate
-        )
-        return [opt_forward, opt_backward]
+        return optimizer
         
     @torch.no_grad()
     def sample(
@@ -333,3 +334,8 @@ class SDSB(pl.LightningModule):
             return img_loss + txt_loss
             
         return img_loss
+        
+    def validation_step(self, batch, batch_idx):
+        loss = self.shared_step(batch, batch_idx)
+        self.log("val/loss", loss, prog_bar=True)
+        return loss

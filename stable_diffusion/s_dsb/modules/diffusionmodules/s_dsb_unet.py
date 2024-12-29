@@ -180,9 +180,6 @@ class SDSBUNet(nn.Module):
         use_scale_shift_norm=False,
         resblock_updown=False,
         use_checkpoint=False,
-        use_spatial_transformer=False,
-        transformer_depth=1,
-        context_dim=None,
         reparam_type=None,    # S-DSB特有:重参数化类型
         direction=None,       # S-DSB特有:前向/反向
     ):
@@ -206,8 +203,7 @@ class SDSBUNet(nn.Module):
         self.num_heads = num_heads
         self.num_head_channels = num_head_channels
         self.num_heads_upsample = num_heads_upsample
-        self.use_spatial_transformer = use_spatial_transformer
-        
+
         # 时间嵌入
         time_embed_dim = model_channels * 4
         self.time_embed = nn.Sequential(
@@ -247,24 +243,14 @@ class SDSBUNet(nn.Module):
                 ]
                 ch = mult * model_channels
                 if ds in attention_resolutions:
-                    if use_spatial_transformer:
-                        layers.append(
-                            SpatialTransformer(
-                                ch, num_heads, ch // num_heads,
-                                depth=transformer_depth,
-                                context_dim=context_dim
-                            )
+                    layers.append(
+                        AttentionBlock(
+                            ch,
+                            num_heads=num_heads,
+                            num_head_channels=num_head_channels,
+                            use_checkpoint=use_checkpoint,
                         )
-                    else:
-                        layers.append(
-                            AttentionBlock(
-                                ch,
-                                use_checkpoint=use_checkpoint,
-                                num_heads=num_heads,
-                                num_head_channels=num_head_channels,
-                                use_new_attention_order=False,
-                            )
-                        )
+                    )
                 self.input_blocks.append(TimestepEmbedSequential(*layers))
                 input_block_chans.append(ch)
             if level != len(channel_mult) - 1:
@@ -297,16 +283,11 @@ class SDSBUNet(nn.Module):
                 dropout,
                 use_checkpoint=use_checkpoint,
             ),
-            SpatialTransformer(
-                ch, num_heads, ch // num_heads,
-                depth=transformer_depth,
-                context_dim=context_dim
-            ) if use_spatial_transformer else AttentionBlock(
+            AttentionBlock(
                 ch,
-                use_checkpoint=use_checkpoint,
                 num_heads=num_heads,
                 num_head_channels=num_head_channels,
-                use_new_attention_order=False,
+                use_checkpoint=use_checkpoint,
             ),
             ResBlock(
                 ch,
