@@ -7,6 +7,9 @@ data/
 # checkpoints
 checkpoints/
 
+# ckpt files
+*.ckpt
+
 # pycache
 __pycache__/
 
