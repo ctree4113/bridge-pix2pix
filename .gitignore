@@ -1,0 +1,20 @@
+.DS_store
+.idea
+
+# data
+data/
+
+# checkpoints
+checkpoints/
+
+# pycache
+__pycache__/
+
+# __init__.py
+__init__.py
+
+# logs
+logs/
+
+# wandb
+wandb/
