@@ -10,6 +10,9 @@ checkpoints/
 # ckpt files
 *.ckpt
 
+# arrow files
+*.arrow
+
 # pycache
 __pycache__/
 
