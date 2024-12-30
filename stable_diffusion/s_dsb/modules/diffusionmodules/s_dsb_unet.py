@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from einops import rearrange
+from torch.utils.checkpoint import checkpoint
 
 from ...util import checkpoint, conv_nd, linear, zero_module, normalization
 
@@ -179,7 +180,7 @@ class SDSBUNet(nn.Module):
         num_heads_upsample=-1,
         use_scale_shift_norm=False,
         resblock_updown=False,
-        use_checkpoint=False,
+        use_checkpoint=True,
         reparam_type=None,    # S-DSB特有:重参数化类型
         direction=None,       # S-DSB特有:前向/反向
     ):
@@ -203,6 +204,7 @@ class SDSBUNet(nn.Module):
         self.num_heads = num_heads
         self.num_head_channels = num_head_channels
         self.num_heads_upsample = num_heads_upsample
+        self.use_checkpoint = use_checkpoint
 
         # 时间嵌入
         time_embed_dim = model_channels * 4
@@ -369,6 +371,10 @@ class SDSBUNet(nn.Module):
         # 输出
         h = h.type(x.dtype)
         return self.out(h)
+
+    def _forward(self, x, timesteps, context=None):
+        # 原来的forward逻辑
+        ...
 
 class TimestepEmbedSequential(nn.Sequential):
     """支持时间步和上下文的Sequential"""

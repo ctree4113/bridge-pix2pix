@@ -28,6 +28,7 @@ class SDSB(pl.LightningModule):
         use_ema=True,
         ema_decay=0.9999,
         learning_rate=1e-4,
+        use_amp=True,
         **kwargs
     ):
         super().__init__()
@@ -37,6 +38,7 @@ class SDSB(pl.LightningModule):
         self.learning_rate = learning_rate
         self.use_ema = use_ema
         self.reparam_type = reparam_type
+        self.use_amp = use_amp
         
         # 初始化UNet
         # 过滤UNet配置参数
@@ -338,4 +340,9 @@ class SDSB(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         loss = self.shared_step(batch, batch_idx)
         self.log("val/loss", loss, prog_bar=True)
+        return loss
+
+    def training_step(self, batch, batch_idx):
+        with torch.cuda.amp.autocast(enabled=self.use_amp):
+            loss = self.shared_step(batch, batch_idx)
         return loss
