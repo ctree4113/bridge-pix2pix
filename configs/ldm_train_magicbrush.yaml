@@ -2,7 +2,6 @@ model:
   base_learning_rate: 5.0e-05
   target: ldm.models.diffusion.ddpm_edit.LatentDiffusion
   params:
-    ckpt_path: stable_diffusion/models/ldm/stable-diffusion-v1/v1-5-pruned-emaonly.ckpt
     linear_start: 0.00085
     linear_end: 0.012
     num_timesteps_cond: 1
@@ -10,14 +9,13 @@ model:
     timesteps: 1000
     first_stage_key: edited
     cond_stage_key: edit
-    image_size: 32
-    channels: 4
+    image_size: 64
+    channels: 3
     cond_stage_trainable: false
     conditioning_key: hybrid
     monitor: val/loss_simple_ema
     scale_factor: 0.18215
-    use_ema: true
-    load_ema: true
+    use_ema: false
 
     scheduler_config:
       target: ldm.lr_scheduler.LambdaLinearScheduler
@@ -31,14 +29,14 @@ model:
     unet_config:
       target: ldm.modules.diffusionmodules.openaimodel.UNetModel
       params:
-        image_size: 32
+        image_size: 64
         in_channels: 8
         out_channels: 4
-        model_channels: 320
-        attention_resolutions: [4, 2, 1]
+        model_channels: 128
+        attention_resolutions: [4]
         num_res_blocks: 2
-        channel_mult: [1, 2, 4, 4]
-        num_heads: 8
+        channel_mult: [1, 2, 3]
+        num_heads: 4
         use_spatial_transformer: True
         transformer_depth: 1
         context_dim: 768
@@ -56,12 +54,8 @@ model:
           resolution: 256
           in_channels: 3
           out_ch: 3
-          ch: 128
-          ch_mult:
-          - 1
-          - 2
-          - 4
-          - 4
+          ch: 64
+          ch_mult: [1, 2, 4]
           num_res_blocks: 2
           attn_resolutions: []
           dropout: 0.0
@@ -74,7 +68,7 @@ model:
 data:
   target: main.DataModuleFromConfig
   params:
-    batch_size: 1
+    batch_size: 2
     num_workers: 2
     train:
       target: data.magicbrush_dataset.MagicBrushDataset
