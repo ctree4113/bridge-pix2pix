@@ -58,16 +58,16 @@ class MagicBrushDataset(Dataset):
             target_img = target_img.resize((resize_res, resize_res), Image.Resampling.LANCZOS)
             mask_img = mask_img.resize((resize_res, resize_res), Image.Resampling.LANCZOS)
             
-            # 转换为tensor并归一化
-            source_img = rearrange(2 * torch.tensor(np.array(source_img)).float() / 255 - 1, "h w c -> c h w")
-            target_img = rearrange(2 * torch.tensor(np.array(target_img)).float() / 255 - 1, "h w c -> c h w")
-            mask_img = rearrange(torch.tensor(np.array(mask_img)).float() / 255, "h w c -> c h w")
+            # 转换为tensor并归一化到[-1,1]范围
+            source_img = self._preprocess_image(source_img)
+            target_img = self._preprocess_image(target_img)
+            mask_img = self._preprocess_mask(mask_img)
             
             # 随机裁剪和翻转
             crop = torchvision.transforms.RandomCrop(self.crop_res)
             flip = torchvision.transforms.RandomHorizontalFlip(float(self.flip_prob))
             
-            # 同时应用变换
+            # 同时应用变换以保持一致性
             imgs = torch.cat((source_img, target_img, mask_img))
             imgs = flip(crop(imgs))
             source_img, target_img, mask_img = imgs.chunk(3)
@@ -80,14 +80,18 @@ class MagicBrushDataset(Dataset):
         instruction = item['instruction']
         if not instruction:
             instruction = ""
+            
+        # 确保指令是字符串
+        if isinstance(instruction, (list, tuple)):
+            instruction = " ".join(instruction)
 
-        # 返回完整信息
+        # 返回 ldm 格式的数据
         return {
-            "edited": target_img,
+            "edited": target_img,  # 目标图像
             "edit": {
-                "c_concat": source_img,
-                "c_crossattn": instruction,
-                "mask": mask_img,
+                "c_concat": source_img,  # 源图像
+                "c_crossattn": instruction,  # 文本指令
+                "mask": mask_img,  # 编辑掩码
                 "meta": {
                     "img_id": item["img_id"],
                     "turn_index": item["turn_index"]
@@ -96,9 +100,25 @@ class MagicBrushDataset(Dataset):
         }
     
     def _load_image(self, img_data):
-        """统一的图像加载函数"""
+        """统一的图像加载函数，确保输出RGB图像"""
         if isinstance(img_data, bytes):
             return Image.open(io.BytesIO(img_data)).convert('RGB')
         elif isinstance(img_data, np.ndarray):
-            return Image.fromarray(img_data)
-        return img_data
+            if img_data.ndim == 2:
+                img_data = np.stack([img_data] * 3, axis=-1)
+            return Image.fromarray(img_data).convert('RGB')
+        return img_data.convert('RGB')
+        
+    def _preprocess_image(self, img):
+        """图像预处理:转换为3通道tensor并归一化到[-1,1]"""
+        img = torch.tensor(np.array(img)).float()
+        img = rearrange(img, 'h w c -> c h w')
+        img = img / 127.5 - 1.0  # 归一化到[-1,1]
+        return img
+        
+    def _preprocess_mask(self, mask):
+        """掩码预处理:转换为3通道tensor并归一化到[0,1]"""
+        mask = torch.tensor(np.array(mask)).float()
+        mask = rearrange(mask, 'h w c -> c h w')
+        mask = mask / 255.0  # 归一化到[0,1]
+        return mask
