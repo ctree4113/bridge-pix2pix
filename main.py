@@ -6,6 +6,7 @@ import torchvision
 import pytorch_lightning as pl
 import json
 import pickle
+import matplotlib.pyplot as plt
 
 from packaging import version
 from omegaconf import OmegaConf
@@ -349,7 +350,7 @@ def all_gather(data):
         return data_list
 
 class ImageLogger(Callback):
-    def __init__(self, batch_frequency, max_images, clamp=True, increase_log_steps=True,
+    def __init__(self, batch_frequency=2000, max_images=4, clamp=True, increase_log_steps=True,
                  rescale=True, disabled=False, log_on_batch_idx=False, log_first_step=False,
                  log_images_kwargs=None):
         super().__init__()
@@ -359,7 +360,7 @@ class ImageLogger(Callback):
         self.logger_log_images = {
             pl.loggers.TestTubeLogger: self._testtube,
         }
-        self.log_steps = [2 ** n for n in range(6, int(np.log2(self.batch_freq)) + 1)]
+        self.log_steps = [2 ** n for n in range(int(np.log2(self.batch_freq)) + 1)]
         if not increase_log_steps:
             self.log_steps = [self.batch_freq]
         self.clamp = clamp
@@ -367,6 +368,53 @@ class ImageLogger(Callback):
         self.log_on_batch_idx = log_on_batch_idx
         self.log_images_kwargs = log_images_kwargs if log_images_kwargs else {}
         self.log_first_step = log_first_step
+        
+    def on_validation_epoch_end(self, trainer, pl_module):
+        if not self.disabled:
+            try:
+                # 检查是否有 clip_scores 和 losses 属性
+                if hasattr(pl_module, 'clip_scores') and hasattr(pl_module, 'losses'):
+                    if len(pl_module.clip_scores) > 0 and len(pl_module.losses) > 0:
+                        # 绘制 trade-off 曲线
+                        plt.figure(figsize=(12,5))
+                        
+                        # 第一个子图: CLIP-Loss trade-off
+                        plt.subplot(1,2,1)
+                        plt.scatter(pl_module.clip_scores, pl_module.losses, alpha=0.5)
+                        plt.xlabel('CLIP Score')
+                        plt.ylabel('Loss')
+                        plt.title('CLIP-Loss Trade-off')
+                        
+                        # 添加趋势线
+                        z = np.polyfit(pl_module.clip_scores, pl_module.losses, 1)
+                        p = np.poly1d(z)
+                        plt.plot(pl_module.clip_scores, p(pl_module.clip_scores), "r--", alpha=0.8)
+                        
+                        # 第二个子图: Loss随epoch变化
+                        plt.subplot(1,2,2)
+                        epochs = range(len(pl_module.losses))
+                        plt.plot(epochs, pl_module.losses, 'b-', label='Training Loss')
+                        plt.xlabel('Steps')
+                        plt.ylabel('Loss')
+                        plt.title('Training Loss Curve')
+                        plt.legend()
+                        
+                        # 保存图像
+                        save_path = f"{trainer.logger.log_dir}/training_curves_epoch_{trainer.current_epoch}.png"
+                        plt.savefig(save_path)
+                        plt.close()
+                        
+                        # 同时将数据保存为CSV,方便后续分析
+                        import pandas as pd
+                        df = pd.DataFrame({
+                            'clip_score': pl_module.clip_scores,
+                            'loss': pl_module.losses
+                        })
+                        df.to_csv(f"{trainer.logger.log_dir}/metrics_epoch_{trainer.current_epoch}.csv")
+                        
+            except Exception as e:
+                print(f"Warning: Failed to plot curves: {str(e)}")
+                pass
 
     @rank_zero_only
     def _testtube(self, pl_module, images, batch_idx, split):
@@ -572,15 +620,14 @@ if __name__ == "__main__":
         configs = [OmegaConf.load(cfg) for cfg in opt.base]
         cli = OmegaConf.from_dotlist(unknown)
         config = OmegaConf.merge(*configs, cli)
-
-        if resume:
-            # By default, when finetuning from Stable Diffusion, we load the EMA-only checkpoint to initialize all weights.
-            # If resuming InstructPix2Pix from a finetuning checkpoint, instead load both EMA and non-EMA weights.
-            config.model.params.load_ema = True
-
+        
+        # 修改这里: 使用 get 而不是 pop,或者 pop 后重新赋值
         lightning_config = config.pop("lightning", OmegaConf.create())
+        config.lightning = lightning_config  # 添加这行,保证 lightning 配置仍然可用
+        
         # merge trainer cli with config
         trainer_config = lightning_config.get("trainer", OmegaConf.create())
+        
         # default to ddp
         trainer_config["accelerator"] = "ddp"
         for k in nondefault_trainer_args(opt):
@@ -633,7 +680,10 @@ if __name__ == "__main__":
             "target": "pytorch_lightning.callbacks.ModelCheckpoint",
             "params": {
                 "dirpath": ckptdir,
-                "filename": "{epoch:06}",
+                "filename": "{epoch:06}-{val/clip_score:.2f}",
+                "monitor": "val/clip_score",
+                "mode": "max",
+                "save_top_k": 1,
                 "verbose": True,
                 "save_last": True,
             }
