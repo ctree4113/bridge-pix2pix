@@ -21,3 +21,6 @@ logs/
 
 # wandb
 wandb/
+
+# taming-transformers
+taming-transformers/
