@@ -538,6 +538,57 @@ class CUDACallback(Callback):
             pass
 
 
+# 添加一个新的回调类来记录训练数据
+class TrainingMonitor(Callback):
+    def __init__(self, save_dir):
+        super().__init__()
+        self.save_dir = save_dir
+        self.metrics = {
+            'step': [],
+            'epoch': [],
+            'loss': [],
+            'clip_score': [],
+            'lr': []
+        }
+        
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, *args, **kwargs):
+        # 记录每个step的指标
+        metrics = trainer.callback_metrics
+        self.metrics['step'].append(trainer.global_step)
+        self.metrics['epoch'].append(trainer.current_epoch)
+        
+        # 确保值是标量而不是tensor
+        loss = metrics.get('train/loss')
+        if isinstance(loss, torch.Tensor):
+            loss = loss.detach().cpu().item()
+        self.metrics['loss'].append(loss if loss is not None else float('nan'))
+        
+        clip_score = metrics.get('train/clip_score')
+        if isinstance(clip_score, torch.Tensor):
+            clip_score = clip_score.detach().cpu().item()
+        self.metrics['clip_score'].append(clip_score if clip_score is not None else float('nan'))
+        
+        lr = metrics.get('lr_abs')
+        if isinstance(lr, torch.Tensor):
+            lr = lr.detach().cpu().item()
+        self.metrics['lr'].append(lr if lr is not None else float('nan'))
+        
+        # 定期保存数据
+        if trainer.global_step % 100 == 0:  # 每100步保存一次
+            self.save_metrics()
+            
+    def on_train_end(self, trainer, pl_module):
+        # 训练结束时保存完整数据
+        self.save_metrics()
+        
+    def save_metrics(self):
+        # 保存为CSV格式
+        import pandas as pd
+        df = pd.DataFrame(self.metrics)
+        save_path = os.path.join(self.save_dir, 'training_metrics.csv')
+        df.to_csv(save_path, index=False)
+
+
 if __name__ == "__main__":
     # custom parser to specify config files, train, test and debug mode,
     # postfix, resume.
@@ -674,18 +725,18 @@ if __name__ == "__main__":
         logger_cfg = OmegaConf.merge(default_logger_cfg, logger_cfg)
         trainer_kwargs["logger"] = instantiate_from_config(logger_cfg)
 
-        # modelcheckpoint - use TrainResult/EvalResult(checkpoint_on=metric) to
-        # specify which metric is used to determine best models
+        # modelcheckpoint配置
         default_modelckpt_cfg = {
             "target": "pytorch_lightning.callbacks.ModelCheckpoint",
             "params": {
                 "dirpath": ckptdir,
-                "filename": "{epoch:06}-{val/clip_score:.2f}",
-                "monitor": "val/clip_score",
-                "mode": "max",
-                "save_top_k": 1,
+                "filename": "best-{epoch:04}-{train/loss:.4f}",  # 使用loss而不是clip_score
+                "monitor": "train/loss",                         # 监控loss
+                "mode": "min",                                   # 最小化loss
+                "save_top_k": 1,                                # 只保存最好的一个
                 "verbose": True,
-                "save_last": True,
+                "save_last": True,                              # 同时保存最新的模型为last.ckpt
+                "auto_insert_metric_name": False
             }
         }
 
@@ -712,19 +763,16 @@ if __name__ == "__main__":
                     "lightning_config": lightning_config,
                 }
             },
-            "image_logger": {
-                "target": "main.ImageLogger",
+            "training_monitor": {  # 添加新的回调
+                "target": "main.TrainingMonitor",
                 "params": {
-                    "batch_frequency": 750,
-                    "max_images": 4,
-                    "clamp": True
+                    "save_dir": logdir,  # 保存到日志目录
                 }
             },
             "learning_rate_logger": {
                 "target": "main.LearningRateMonitor",
                 "params": {
                     "logging_interval": "step",
-                    # "log_momentum": True
                 }
             },
             "cuda_callback": {
@@ -738,23 +786,6 @@ if __name__ == "__main__":
             callbacks_cfg = lightning_config.callbacks
         else:
             callbacks_cfg = OmegaConf.create()
-
-        print(
-            'Caution: Saving checkpoints every n train steps without deleting. This might require some free space.')
-        default_metrics_over_trainsteps_ckpt_dict = {
-            'metrics_over_trainsteps_checkpoint': {
-                "target": 'pytorch_lightning.callbacks.ModelCheckpoint',
-                'params': {
-                    "dirpath": os.path.join(ckptdir, 'trainstep_checkpoints'),
-                    "filename": "{epoch:06}-{step:09}",
-                    "verbose": True,
-                    'save_top_k': -1,
-                    'every_n_train_steps': 1000,
-                    'save_weights_only': True
-                }
-            }
-        }
-        default_callbacks_cfg.update(default_metrics_over_trainsteps_ckpt_dict)
 
         callbacks_cfg = OmegaConf.merge(default_callbacks_cfg, callbacks_cfg)
         if 'ignore_keys_callback' in callbacks_cfg and hasattr(trainer_opt, 'resume_from_checkpoint'):
