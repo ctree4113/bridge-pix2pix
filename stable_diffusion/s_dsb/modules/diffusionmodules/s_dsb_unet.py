@@ -1,11 +1,16 @@
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 from einops import rearrange
-from torch.utils.checkpoint import checkpoint
+from typing import List, Optional
 
 from ...util import checkpoint, conv_nd, linear, zero_module, normalization
+from ..attention import SpatialTransformer
+
+def exists(x):
+    return x is not None
 
 def get_timestep_embedding(timesteps, embedding_dim):
     """构建时间步的正弦嵌入"""
@@ -161,220 +166,177 @@ class QKVAttention(nn.Module):
         a = torch.einsum("bts,bcs->bct", weight, v)
         return a.reshape(bs, -1, length)
 
-class SDSBUNet(nn.Module):
-    """S-DSB专用的UNet实现"""
+class ConvBlock(nn.Module):
+    """卷积块"""
     def __init__(
         self,
-        image_size,
-        in_channels,
-        model_channels,
-        out_channels,
-        num_res_blocks,
-        attention_resolutions,
-        dropout=0,
-        channel_mult=(1,2,4,8),
-        conv_resample=True,
-        dims=2,
-        num_heads=8,
-        num_head_channels=-1,
-        num_heads_upsample=-1,
-        use_scale_shift_norm=False,
-        resblock_updown=False,
-        use_checkpoint=True,
-        reparam_type=None,    # S-DSB特有:重参数化类型
-        direction=None,       # S-DSB特有:前向/反向
+        in_channels: int,
+        out_channels: Optional[int] = None,
+        kernel_size: int = 3,
+        stride: int = 1,
+        padding: int = 1,
+        use_norm: bool = True,
+        use_act: bool = True,
+        dropout: float = 0.0,
+        temb_channels: Optional[int] = None
+    ):
+        super().__init__()
+        out_channels = out_channels or in_channels
+        
+        self.conv = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding
+        )
+        
+        # 根据通道数选择合适的组数
+        if use_norm:
+            if out_channels < 8:
+                self.norm = nn.GroupNorm(1, out_channels)  # 如果通道数小于8,使用单组
+            else:
+                self.norm = nn.GroupNorm(8, out_channels)
+        else:
+            self.norm = nn.Identity()
+            
+        self.act = nn.SiLU() if use_act else nn.Identity()
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        
+        # 时间嵌入投影
+        if exists(temb_channels):
+            self.temb_proj = nn.Sequential(
+                nn.SiLU(),
+                nn.Linear(temb_channels, out_channels)
+            )
+        else:
+            self.temb_proj = None
+        
+    def forward(self, x: torch.Tensor, temb: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """前向传播"""
+        h = self.conv(x)
+        h = self.norm(h)
+        
+        # 添加时间嵌入
+        if exists(self.temb_proj) and exists(temb):
+            temb = self.temb_proj(temb)[:, :, None, None]
+            h = h + temb
+            
+        h = self.act(h)
+        h = self.dropout(h)
+        return h
+
+class SDSBUNet(nn.Module):
+    """S-DSB的U-Net实现"""
+    
+    def __init__(
+        self,
+        model_channels: int = 96,
+        attention_resolutions: List[int] = [4],
+        channel_mult: List[int] = [1, 2, 3],
+        num_heads: int = 4,
+        context_dim: int = 256,
+        use_spatial_transformer: bool = True,
+        transformer_depth: int = 1
     ):
         super().__init__()
         
-        # S-DSB特有配置
-        self.reparam_type = reparam_type
-        self.direction = direction
-        
-        # 基础配置
-        self.image_size = image_size
-        self.in_channels = in_channels
+        # 保存配置
         self.model_channels = model_channels
-        self.out_channels = out_channels
-        self.num_res_blocks = num_res_blocks
         self.attention_resolutions = attention_resolutions
-        self.dropout = dropout
         self.channel_mult = channel_mult
-        self.conv_resample = conv_resample
-        self.dtype = torch.float32
         self.num_heads = num_heads
-        self.num_head_channels = num_head_channels
-        self.num_heads_upsample = num_heads_upsample
-        self.use_checkpoint = use_checkpoint
-
+        self.context_dim = context_dim
+        self.use_spatial_transformer = use_spatial_transformer
+        self.transformer_depth = transformer_depth
+        
         # 时间嵌入
         time_embed_dim = model_channels * 4
         self.time_embed = nn.Sequential(
-            linear(model_channels, time_embed_dim),
+            nn.Linear(model_channels, time_embed_dim),
             nn.SiLU(),
-            linear(time_embed_dim, time_embed_dim),
+            nn.Linear(time_embed_dim, time_embed_dim)
         )
-
-        # 输入处理
-        if self.reparam_type == "term":
-            self.input_blocks = nn.ModuleList([
-                TimestepEmbedSequential(
-                    conv_nd(dims, in_channels * 2, model_channels, 3, padding=1)
+        
+        # 编码器
+        self.encoder = nn.ModuleList()
+        input_channels = 3  # 从原始图像的通道数开始
+        for mult in channel_mult:
+            output_channels = model_channels * mult
+            self.encoder.append(
+                ConvBlock(
+                    input_channels,
+                    output_channels,
+                    temb_channels=time_embed_dim
                 )
-            ])
-        else:
-            self.input_blocks = nn.ModuleList([
-                TimestepEmbedSequential(
-                    conv_nd(dims, in_channels, model_channels, 3, padding=1)
-                )
-            ])
-
-        # 构建下采样块
-        input_block_chans = [model_channels]
-        ch = model_channels
-        ds = 1
-        for level, mult in enumerate(channel_mult):
-            for _ in range(num_res_blocks):
-                layers = [
-                    ResBlock(
-                        ch,
-                        time_embed_dim,
-                        dropout,
-                        out_channels=mult * model_channels,
-                        use_checkpoint=use_checkpoint,
-                    )
-                ]
-                ch = mult * model_channels
-                if ds in attention_resolutions:
-                    layers.append(
-                        AttentionBlock(
-                            ch,
-                            num_heads=num_heads,
-                            num_head_channels=num_head_channels,
-                            use_checkpoint=use_checkpoint,
-                        )
-                    )
-                self.input_blocks.append(TimestepEmbedSequential(*layers))
-                input_block_chans.append(ch)
-            if level != len(channel_mult) - 1:
-                out_ch = ch
-                self.input_blocks.append(
-                    TimestepEmbedSequential(
-                        ResBlock(
-                            ch,
-                            time_embed_dim,
-                            dropout,
-                            out_channels=out_ch,
-                            use_checkpoint=use_checkpoint,
-                            down=True,
-                        )
-                        if resblock_updown
-                        else Downsample(
-                            ch, conv_resample, dims=dims, out_channels=out_ch
-                        )
-                    )
-                )
-                ch = out_ch
-                input_block_chans.append(ch)
-                ds *= 2
-
-        # 中间块
-        self.middle_block = TimestepEmbedSequential(
-            ResBlock(
-                ch,
-                time_embed_dim,
-                dropout,
-                use_checkpoint=use_checkpoint,
-            ),
-            AttentionBlock(
-                ch,
+            )
+            input_channels = output_channels  # 更新下一层的输入通道数
+            
+        # 注意力层
+        self.attention = nn.ModuleList([
+            EfficientAttention(
+                model_channels * mult,
                 num_heads=num_heads,
-                num_head_channels=num_head_channels,
-                use_checkpoint=use_checkpoint,
-            ),
-            ResBlock(
-                ch,
-                time_embed_dim,
-                dropout,
-                use_checkpoint=use_checkpoint,
-            ),
-        )
-
-        # 构建上采样块
-        self.output_blocks = nn.ModuleList([])
-        for level, mult in list(enumerate(channel_mult))[::-1]:
-            for i in range(num_res_blocks + 1):
-                ich = input_block_chans.pop()
-                layers = [
-                    ResBlock(
-                        ch + ich,
-                        time_embed_dim,
-                        dropout,
-                        out_channels=model_channels * mult,
-                        use_checkpoint=use_checkpoint,
-                    )
-                ]
-                ch = model_channels * mult
-                if ds in attention_resolutions:
-                    layers.append(
-                        AttentionBlock(
-                            ch,
-                            num_heads=num_heads_upsample,
-                            num_head_channels=num_head_channels,
-                            use_checkpoint=use_checkpoint,
-                        )
-                    )
-                if level and i == num_res_blocks:
-                    out_ch = ch
-                    layers.append(
-                        ResBlock(
-                            ch,
-                            time_embed_dim,
-                            dropout,
-                            out_channels=out_ch,
-                            use_checkpoint=use_checkpoint,
-                            up=True,
-                        )
-                        if resblock_updown
-                        else Upsample(ch, conv_resample, dims=dims, out_channels=out_ch)
-                    )
-                    ds //= 2
-                self.output_blocks.append(TimestepEmbedSequential(*layers))
-                ch = out_ch
-
-        # 输出层
-        self.out = nn.Sequential(
-            normalization(ch),
-            nn.SiLU(),
-            zero_module(conv_nd(dims, ch, out_channels, 3, padding=1)),
-        )
-
-    def forward(self, x, timesteps, context=None):
+                context_dim=context_dim
+            )
+            for mult in channel_mult
+            if mult in attention_resolutions
+        ])
+        
+        # 解码器
+        self.decoder = nn.ModuleList()
+        reversed_mult = list(reversed(channel_mult))
+        input_channels = model_channels * reversed_mult[0]  # 从最后一层编码器的输出开始
+        
+        for i in range(len(reversed_mult)):
+            # 计算跳跃连接的通道数
+            skip_channels = model_channels * reversed_mult[i]
+            
+            # 计算输出通道数
+            if i == len(reversed_mult) - 1:  # 最后一层
+                out_channels = 3  # 输出RGB图像
+            else:
+                out_channels = model_channels * reversed_mult[i+1]
+                
+            # 总输入通道数 = 当前特征通道数 + 跳跃连接通道数
+            total_in_channels = input_channels + skip_channels
+                
+            self.decoder.append(
+                ConvBlock(
+                    total_in_channels,
+                    out_channels,
+                    temb_channels=time_embed_dim
+                )
+            )
+            
+            input_channels = out_channels  # 更新下一层的输入通道数
+            
+    def forward(
+        self,
+        x: torch.Tensor,
+        t: torch.Tensor,
+        context: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """前向传播"""
         # 时间嵌入
-        emb = self.time_embed(get_timestep_embedding(timesteps, self.model_channels))
+        t_emb = get_timestep_embedding(t, self.model_channels)
+        t_emb = self.time_embed(t_emb)
         
-        # 下采样路径
-        hs = []
-        h = x.type(self.dtype)
-        for module in self.input_blocks:
-            h = module(h, emb, context)
-            hs.append(h)
-        
-        # 中间处理
-        h = self.middle_block(h, emb, context)
-        
-        # 上采样路径
-        for module in self.output_blocks:
-            h = torch.cat([h, hs.pop()], dim=1)
-            h = module(h, emb, context)
-        
-        # 输出
-        h = h.type(x.dtype)
-        return self.out(h)
-
-    def _forward(self, x, timesteps, context=None):
-        # 原来的forward逻辑
-        ...
+        # 编码
+        h = []
+        for enc in self.encoder:
+            x = enc(x, t_emb)
+            h.append(x)
+            
+        # 注意力
+        for attn in self.attention:
+            x = attn(x, context=context)
+            
+        # 解码
+        for dec in self.decoder:
+            x = dec(torch.cat([x, h.pop()], dim=1), t_emb)
+            
+        return x
 
 class TimestepEmbedSequential(nn.Sequential):
     """支持时间步和上下文的Sequential"""
@@ -426,3 +388,225 @@ class Downsample(nn.Module):
     def forward(self, x):
         assert x.shape[1] == self.channels
         return self.op(x)
+
+class CrossAttention(nn.Module):
+    def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0.):
+        super().__init__()
+        inner_dim = dim_head * heads
+        context_dim = default(context_dim, query_dim)
+
+        self.scale = dim_head ** -0.5
+        self.heads = heads
+
+        # 减少中间特征维度
+        self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
+        self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
+        self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
+
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, query_dim),
+            nn.Dropout(dropout)
+        )
+
+        # 使用memory efficient attention
+        self.attention = MemoryEfficientAttention()
+
+    def forward(self, x, context=None):
+        h = self.heads
+
+        q = self.to_q(x)
+        k = self.to_k(context)
+        v = self.to_v(context)
+
+        # 重塑张量以减少内存使用
+        q = q.reshape(-1, h, q.shape[-1] // h)
+        k = k.reshape(-1, h, k.shape[-1] // h)
+        v = v.reshape(-1, h, v.shape[-1] // h)
+
+        # 使用memory efficient attention
+        out = self.attention(q, k, v)
+        
+        # 重塑回原始维度
+        out = out.reshape(x.shape[0], -1, x.shape[-1])
+        return self.to_out(out)
+
+class MemoryEfficientAttention(nn.Module):
+    """内存高效的attention实现"""
+    def __init__(self):
+        super().__init__()
+        
+    def forward(self, q, k, v):
+        # 分块计算attention
+        chunk_size = 128
+        chunks = []
+        
+        for i in range(0, q.shape[0], chunk_size):
+            q_chunk = q[i:i+chunk_size]
+            k_chunk = k[i:i+chunk_size] 
+            v_chunk = v[i:i+chunk_size]
+            
+            # 计算attention scores
+            scores = torch.bmm(q_chunk, k_chunk.transpose(-2, -1))
+            scores = F.softmax(scores, dim=-1)
+            
+            # 计算attention输出
+            chunk_out = torch.bmm(scores, v_chunk)
+            chunks.append(chunk_out)
+            
+        return torch.cat(chunks, dim=0)
+
+class AttnBlock(nn.Module):
+    def __init__(self, in_channels):
+        super().__init__()
+        self.in_channels = in_channels
+
+        self.norm = Normalize(in_channels)
+        self.q = torch.nn.Conv2d(in_channels,
+                                in_channels,
+                                kernel_size=1,
+                                stride=1,
+                                padding=0)
+        self.k = torch.nn.Conv2d(in_channels,
+                                in_channels,
+                                kernel_size=1,
+                                stride=1,
+                                padding=0)
+        self.v = torch.nn.Conv2d(in_channels,
+                                in_channels,
+                                kernel_size=1,
+                                stride=1,
+                                padding=0)
+        self.proj_out = torch.nn.Conv2d(in_channels,
+                                       in_channels,
+                                       kernel_size=1,
+                                       stride=1,
+                                       padding=0)
+
+    def forward(self, x):
+        h_ = x
+        h_ = self.norm(h_)
+        
+        # 获取输入维度
+        B, C, H, W = h_.shape
+        
+        # 计算q, k, v
+        q = self.q(h_)
+        k = self.k(h_)
+        v = self.v(h_)
+        
+        # 重塑维度以进行attention计算
+        q = q.reshape(B, C, -1)  # B, C, HW
+        k = k.reshape(B, C, -1)  # B, C, HW
+        v = v.reshape(B, C, -1)  # B, C, HW
+        
+        # 分块计算attention
+        chunk_size = min(128, H*W)  # 选择合适的块大小
+        attn_outputs = []
+        
+        for i in range(0, H*W, chunk_size):
+            # 获取当前块
+            q_chunk = q[:, :, i:i+chunk_size]  # B, C, chunk_size
+            
+            # 计算attention scores (使用半精度以节省内存)
+            with torch.cuda.amp.autocast():
+                # 计算当前块的attention scores
+                attn = torch.bmm(q_chunk.transpose(1, 2), k)  # B, chunk_size, HW
+                attn = attn * (int(C) ** (-0.5))
+                
+                # 使用chunk计算softmax
+                attn = torch.softmax(attn, dim=-1)
+                
+                # 计算attention输出
+                chunk_out = torch.bmm(attn, v.transpose(1, 2))  # B, chunk_size, C
+            
+            attn_outputs.append(chunk_out)
+        
+        # 合并所有块的输出
+        h_ = torch.cat(attn_outputs, dim=1)  # B, HW, C
+        
+        # 重塑回原始维度
+        h_ = h_.transpose(1, 2).reshape(B, C, H, W)
+        
+        # 投影输出
+        h_ = self.proj_out(h_)
+        
+        return x + h_
+
+def memory_efficient_attention(q, k, v, scale=None):
+    """内存高效的attention实现"""
+    B, H, N, C = q.shape
+    
+    if scale is None:
+        scale = C ** -0.5
+        
+    chunk_size = min(128, N)
+    attn_outputs = []
+    
+    # 分块计算attention
+    for i in range(0, N, chunk_size):
+        q_chunk = q[:, :, i:i+chunk_size]
+        
+        # 使用半精度计算
+        with torch.cuda.amp.autocast():
+            # 计算attention scores
+            scores = torch.matmul(q_chunk, k.transpose(-2, -1)) * scale
+            
+            # 使用log_softmax和exp来避免数值不稳定
+            scores = torch.log_softmax(scores, dim=-1)
+            scores = torch.exp(scores)
+            
+            # 计算attention输出
+            chunk_out = torch.matmul(scores, v)
+            
+        attn_outputs.append(chunk_out)
+        
+    # 合并所有块的输出
+    return torch.cat(attn_outputs, dim=2)
+
+class EfficientAttention(nn.Module):
+    """内存高效的注意力机制"""
+    
+    def __init__(self, dim: int, num_heads: int = 8, context_dim: Optional[int] = None):
+        super().__init__()
+        self.num_heads = num_heads
+        inner_dim = dim
+        
+        self.q = nn.Linear(dim, inner_dim)
+        self.k = nn.Linear(dim, inner_dim)
+        self.v = nn.Linear(dim, inner_dim)
+        
+        if exists(context_dim):
+            self.context_proj = nn.Linear(context_dim, inner_dim)
+            
+    def forward(
+        self,
+        x: torch.Tensor,
+        context: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """前向传播"""
+        batch_size, seq_len, _ = x.shape
+        
+        q = self.q(x)
+        k = self.k(x)
+        v = self.v(x)
+        
+        if exists(context):
+            context = self.context_proj(context)
+            k = torch.cat([k, context], dim=1)
+            v = torch.cat([v, context], dim=1)
+            
+        # 分头
+        q = q.view(batch_size, seq_len, self.num_heads, -1).transpose(1, 2)
+        k = k.view(batch_size, k.shape[1], self.num_heads, -1).transpose(1, 2)
+        v = v.view(batch_size, v.shape[1], self.num_heads, -1).transpose(1, 2)
+        
+        # 高效注意力计算
+        scale = q.shape[-1] ** -0.5
+        scores = torch.matmul(q, k.transpose(-2, -1)) * scale
+        attn = F.softmax(scores, dim=-1)
+        out = torch.matmul(attn, v)
+        
+        # 合并头
+        out = out.transpose(1, 2).reshape(batch_size, seq_len, -1)
+        
+        return out

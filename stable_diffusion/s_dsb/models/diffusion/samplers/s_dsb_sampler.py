@@ -5,81 +5,31 @@ from tqdm import tqdm
 
 from .base import BaseSampler
 from .utils import extract, noise_like
+from .s_dsb_core import SDSBCore
 
 class SDSBSampler(BaseSampler):
-    """S-DSB采样器实现"""
+    """改进的S-DSB采样器"""
     
-    def __init__(
-        self,
-        num_timesteps: int = 1000,
-        gamma_scheduler = None,
-        reparam_type: str = "flow",
-        use_ema: bool = True,
-        clip_denoised: bool = True,
-        return_intermediates: bool = False
-    ):
+    def __init__(self, **kwargs):
         super().__init__()
-        self.num_timesteps = num_timesteps
-        self.gamma_scheduler = gamma_scheduler
-        self.reparam_type = reparam_type
-        self.use_ema = use_ema
-        self.clip_denoised = clip_denoised
-        self.return_intermediates = return_intermediates
+        self.s_dsb = SDSBCore(**kwargs)
         
     def p_sample(
         self,
         model: Any,
         x: torch.Tensor,
-        t: Union[torch.Tensor, int],
+        t: torch.Tensor,
         cond: Optional[Dict[str, torch.Tensor]] = None,
-        clip_denoised: bool = True,
         **kwargs
     ) -> torch.Tensor:
-        """单步采样
+        """单步采样，支持双向过程"""
+        # 获取方向
+        direction = kwargs.get("direction", "backward")
         
-        Args:
-            model: S-DSB模型
-            x: 当前状态
-            t: 时间步
-            cond: 条件信息
-            clip_denoised: 是否裁剪去噪结果
-            
-        Returns:
-            下一个状态
-        """
-        # 获取gamma值
-        gamma_t = extract(self.gamma_scheduler.gammas, t, x.shape)
-        
-        # 模型预测
-        with torch.no_grad():
-            if self.use_ema:
-                with model.ema_scope():
-                    pred = model(x, t, cond)
-            else:
-                pred = model(x, t, cond)
-                
-        # Flow重参数化
-        if self.reparam_type == "flow":
-            # 添加预测的噪声
-            x = x + torch.sqrt(gamma_t) * pred
-            
-            # 可选裁剪
-            if clip_denoised:
-                x = x.clamp(-1., 1.)
-                
-        # Terminal重参数化
+        if direction == "forward":
+            return self.s_dsb.forward_process(x, t)[0]
         else:
-            x = pred
-            if clip_denoised:
-                x = x.clamp(-1., 1.)
-                
-        # 添加噪声(如果不是最后一步)
-        if t[0] > 0:
-            noise = torch.randn_like(x)
-            next_gamma = extract(self.gamma_scheduler.gammas, t-1, x.shape)
-            x = x + torch.sqrt(next_gamma) * noise
-            
-        return x
+            return self.s_dsb.backward_process(x, t, cond)
         
     def sample(
         self,

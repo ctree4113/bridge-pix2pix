@@ -15,52 +15,54 @@ class AbstractEncoder(nn.Module):
     def encode(self, *args, **kwargs):
         raise NotImplementedError
 
-class FrozenCLIPEmbedder(AbstractEncoder):
-    """使用Hugging Face的CLIP transformer作为文本编码器
+class FrozenCLIPEmbedder(nn.Module):
+    """冻结的CLIP编码器"""
     
-    用于S-DSB的条件生成,将文本指令编码为特征向量。
-    """
     def __init__(
         self,
         version: str = "openai/clip-vit-large-patch14",
-        device: str = "cuda",
-        max_length: int = 77
+        freeze: bool = True,
+        layer: str = "last"
     ):
         super().__init__()
         self.tokenizer = CLIPTokenizer.from_pretrained(version)
         self.transformer = CLIPTextModel.from_pretrained(version)
-        self.device = device
-        self.max_length = max_length
-        self.freeze()
-
+        
+        if freeze:
+            self.freeze()
+            
+        self.layer = layer
+        
     def freeze(self):
         """冻结模型参数"""
         self.transformer = self.transformer.eval()
         for param in self.parameters():
             param.requires_grad = False
-
-    def forward(self, text: Union[str, List[str]]) -> torch.Tensor:
-        """前向传播
-        
-        Args:
-            text: 输入文本或文本列表
             
-        Returns:
-            文本特征 [B, S, D]
-        """
-        batch_encoding = self.tokenizer(
+    def forward(self, text: Union[str, List[str]]) -> torch.Tensor:
+        """前向传播"""
+        if isinstance(text, str):
+            text = [text]
+            
+        # 分词
+        tokens = self.tokenizer(
             text,
+            padding=True,
             truncation=True,
-            max_length=self.max_length,
-            return_length=True,
-            return_overflowing_tokens=False,
-            padding="max_length",
+            max_length=77,
             return_tensors="pt"
-        )
-        tokens = batch_encoding["input_ids"].to(self.device)
-        outputs = self.transformer(input_ids=tokens)
+        ).to(self.transformer.device)
         
-        return outputs.last_hidden_state
+        # 获取文本特征
+        outputs = self.transformer(**tokens)
+        
+        # 根据指定层返回特征
+        if self.layer == "last":
+            embeddings = outputs.last_hidden_state
+        else:
+            embeddings = outputs.hidden_states[int(self.layer)]
+            
+        return embeddings
 
     def encode(self, text: Union[str, List[str]]) -> torch.Tensor:
         """编码文本

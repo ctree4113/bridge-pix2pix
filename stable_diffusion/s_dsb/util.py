@@ -290,3 +290,45 @@ def normalization(channels):
     Make a standard normalization layer.
     """
     return nn.GroupNorm(32, channels)
+
+
+def extract(a, t, x_shape):
+    """从序列中提取特定时间步的值
+    
+    Args:
+        a: 源序列
+        t: 时间步
+        x_shape: 目标形状
+        
+    Returns:
+        提取的值，形状与x_shape匹配
+    """
+    batch_size = t.shape[0]
+    out = a.gather(-1, t)
+    return out.reshape(batch_size, *((1,) * (len(x_shape) - 1)))
+
+
+def reparameterize_flow(x_0, t, gamma_t, direction="forward"):
+    """流式重参数化
+    
+    Args:
+        x_0: 初始状态
+        t: 时间步
+        gamma_t: gamma值
+        direction: 方向,'forward' 或 'backward'
+        
+    Returns:
+        重参数化后的状态
+    """
+    # 生成随机噪声
+    noise = torch.randn_like(x_0)
+    
+    # 根据方向计算重参数化
+    if direction == "forward":
+        # 前向过程: x_t = sqrt(1-gamma_t)x_0 + sqrt(gamma_t)eps
+        x_t = torch.sqrt(1 - gamma_t) * x_0 + torch.sqrt(gamma_t) * noise
+    else:
+        # 反向过程: x_t = sqrt(gamma_t)x_0 + sqrt(1-gamma_t)eps 
+        x_t = torch.sqrt(gamma_t) * x_0 + torch.sqrt(1 - gamma_t) * noise
+        
+    return x_t

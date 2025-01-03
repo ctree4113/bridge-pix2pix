@@ -18,18 +18,7 @@ class BaseSampler(abc.ABC):
         noise: Optional[torch.Tensor] = None,
         **kwargs
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, List[torch.Tensor]]]:
-        """采样过程
-        
-        Args:
-            model: S-DSB模型
-            shape: 输出形状
-            cond: 条件信息
-            x_start: 起始图像
-            noise: 初始噪声
-            
-        Returns:
-            采样结果和可选的中间状态
-        """
+        """采样过程"""
         pass
         
     @abc.abstractmethod
@@ -37,19 +26,26 @@ class BaseSampler(abc.ABC):
         self,
         model: Any,
         x: torch.Tensor,
-        t: Union[torch.Tensor, int],
+        t: torch.Tensor,
         cond: Optional[Dict[str, torch.Tensor]] = None,
         **kwargs
     ) -> torch.Tensor:
-        """单步采样
-        
-        Args:
-            model: S-DSB模型
-            x: 当前状态
-            t: 时间步
-            cond: 条件信息
-            
-        Returns:
-            下一个状态
-        """
+        """单步采样"""
         pass
+        
+    def sample_progressive(
+        self,
+        model: Any,
+        shape: Tuple[int, ...],
+        steps: List[int],
+        **kwargs
+    ) -> List[torch.Tensor]:
+        """渐进式采样"""
+        samples = []
+        x = None
+        
+        for step in steps:
+            x = self.sample(model, shape, x_start=x, **kwargs)
+            samples.append(x)
+            
+        return samples
