@@ -1,0 +1,3 @@
+1: {let him wear a pair of sun glasses}
+2: {let him wear a pair of gloves}
+3: {let him wear No. 22 blue and purple jersey}
