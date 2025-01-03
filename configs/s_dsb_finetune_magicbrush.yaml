@@ -3,40 +3,47 @@ model:
   target: s_dsb.models.diffusion.bridge_edit.SDSBEdit
   params:
     num_timesteps: 1000
-    gamma_schedule: "linear"
     gamma_min: 0.00085
     gamma_max: 0.012
-    reparam_type: "flow"
-    use_ema: false
+    gamma_schedule: "linear"
+    use_ema: true
     ema_decay: 0.9999
-    guidance_scale: 7.5
+    guidance_scale: 5.0
     edit_threshold: 0.8
     edit_strategy: "bidirectional"
     progressive_steps: [200, 400, 600, 800]
-    memory_efficient: true
     warmup_steps: 1000
-    max_steps: 1000000
-    learning_rate: 5.0e-05
-
+    max_steps: 2000000
+    
+    scheduler_config:
+      target: s_dsb.lr_scheduler.LambdaLinearScheduler
+      params:
+        warm_up_steps: [1000]
+        cycle_lengths: [10000000000000]
+        f_start: [1.0e-06]
+        f_max: [1.0]
+        f_min: [1.0]
+    
     unet_config:
       target: s_dsb.modules.diffusionmodules.s_dsb_unet.SDSBUNet
       params:
-        model_channels: 128
-        attention_resolutions: [4]
-        channel_mult: [1, 2, 3]
-        num_heads: 4
-        context_dim: 768
+        model_channels: 320
+        attention_resolutions: [4, 2, 1]
+        channel_mult: [1, 2, 4, 4]
+        num_heads: 8
         use_spatial_transformer: true
         transformer_depth: 1
-
+        context_dim: 768
     clip_config:
       target: s_dsb.modules.encoders.modules.FrozenCLIPEmbedder
-
-    scheduler_config:
-      target: s_dsb.schedulers.lr_scheduler.LambdaLinearScheduler
       params:
-        warm_up_steps: 1000
-        total_steps: 1000000
+        version: "openai/clip-vit-large-patch14"
+        freeze: true
+        layer: "last"
+    loss_config:
+      target: s_dsb.modules.losses.s_dsb_losses.SDSBLoss
+      params:
+        num_projections: 10
 
 data:
   target: main.DataModuleFromConfig
@@ -73,6 +80,6 @@ lightning:
 
   trainer:
     benchmark: true
-    max_epochs: 2000
+    max_epochs: 200
     accumulate_grad_batches: 1
     check_val_every_n_epoch: 4
