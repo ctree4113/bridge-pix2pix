@@ -543,49 +543,59 @@ class TrainingMonitor(Callback):
     def __init__(self, save_dir):
         super().__init__()
         self.save_dir = save_dir
-        self.metrics = {
+        # 训练指标
+        self.train_metrics = {
             'step': [],
             'epoch': [],
             'loss': [],
-            'clip_score': [],
             'lr': []
         }
+        # 验证指标
+        self.val_metrics = {
+            'step': [],
+            'epoch': [],
+            'loss': [],
+            'clip_score': []
+        }
         
-    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, *args, **kwargs):
-        # 记录每个step的指标
+    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, *args, **kwargs):
+        # 记录验证指标
         metrics = trainer.callback_metrics
-        self.metrics['step'].append(trainer.global_step)
-        self.metrics['epoch'].append(trainer.current_epoch)
+        self.val_metrics['step'].append(trainer.global_step)
+        self.val_metrics['epoch'].append(trainer.current_epoch)
         
-        # 确保值是标量而不是tensor
-        loss = metrics.get('train/loss')
+        loss = metrics.get('val/loss')
         if isinstance(loss, torch.Tensor):
             loss = loss.detach().cpu().item()
-        self.metrics['loss'].append(loss if loss is not None else float('nan'))
+        self.val_metrics['loss'].append(loss if loss is not None else float('nan'))
         
-        clip_score = metrics.get('train/clip_score')
+        clip_score = metrics.get('val/clip_score')
         if isinstance(clip_score, torch.Tensor):
             clip_score = clip_score.detach().cpu().item()
-        self.metrics['clip_score'].append(clip_score if clip_score is not None else float('nan'))
+        self.val_metrics['clip_score'].append(clip_score if clip_score is not None else float('nan'))
         
-        lr = metrics.get('lr_abs')
-        if isinstance(lr, torch.Tensor):
-            lr = lr.detach().cpu().item()
-        self.metrics['lr'].append(lr if lr is not None else float('nan'))
-        
-        # 定期保存数据
-        if trainer.global_step % 100 == 0:  # 每100步保存一次
-            self.save_metrics()
+        # 每个验证步骤后保存验证数据
+        self.save_metrics('val')
             
     def on_train_end(self, trainer, pl_module):
-        # 训练结束时保存完整数据
-        self.save_metrics()
+        # 训练结束时保存所有数据
+        self.save_metrics('train')
+        self.save_metrics('val')
         
-    def save_metrics(self):
-        # 保存为CSV格式
+    def save_metrics(self, mode='train'):
         import pandas as pd
-        df = pd.DataFrame(self.metrics)
-        save_path = os.path.join(self.save_dir, 'training_metrics.csv')
+        import os
+        
+        metrics = self.train_metrics if mode == 'train' else self.val_metrics
+        
+        # 确保所有列的长度相同
+        max_len = max(len(v) for v in metrics.values())
+        for k in metrics:
+            while len(metrics[k]) < max_len:
+                metrics[k].append(float('nan'))
+                
+        df = pd.DataFrame(metrics)
+        save_path = os.path.join(self.save_dir, f'{mode}_metrics.csv')
         df.to_csv(save_path, index=False)
 
 
