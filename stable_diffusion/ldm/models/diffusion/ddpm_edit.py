@@ -27,6 +27,9 @@ from ldm.modules.distributions.distributions import normal_kl, DiagonalGaussianD
 from ldm.models.autoencoder import VQModelInterface, IdentityFirstStage, AutoencoderKL
 from ldm.modules.diffusionmodules.util import make_beta_schedule, extract_into_tensor, noise_like
 from ldm.models.diffusion.ddim import DDIMSampler
+from transformers import CLIPModel, CLIPProcessor
+import torch.nn.functional as F
+from torchvision import transforms
 
 
 __conditioning_keys__ = {'concat': 'c_concat',
@@ -382,17 +385,15 @@ class DDPM(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         loss, loss_dict = self.shared_step(batch)
-
-        self.log_dict(loss_dict, prog_bar=True,
-                      logger=True, on_step=True, on_epoch=True)
-
-        self.log("global_step", self.global_step,
-                 prog_bar=True, logger=True, on_step=True, on_epoch=False)
-
+        
+        # 记录loss和其他指标
+        self.log_dict(loss_dict, prog_bar=True, logger=True, on_step=True, on_epoch=True)
+        self.log("global_step", self.global_step, prog_bar=True, logger=True, on_step=True, on_epoch=False)
+        
         if self.use_scheduler:
             lr = self.optimizers().param_groups[0]['lr']
             self.log('lr_abs', lr, prog_bar=True, logger=True, on_step=True, on_epoch=False)
-
+        
         return loss
 
     @torch.no_grad()
@@ -401,6 +402,34 @@ class DDPM(pl.LightningModule):
         with self.ema_scope():
             _, loss_dict_ema = self.shared_step(batch)
             loss_dict_ema = {key + '_ema': loss_dict_ema[key] for key in loss_dict_ema}
+            
+            # 在validation时计算CLIP分数
+            try:
+                x = batch[self.first_stage_key]
+                c = batch[self.cond_stage_key]
+                # 使用当前模型生成图像
+                samples = self.sample(cond=c, batch_size=x.shape[0])
+                
+                # 获取原始文本提示 - 修改这部分
+                if isinstance(c, dict) and "c_crossattn" in c:
+                    # 从FrozenCLIPEmbedder获取原始文本
+                    text = self.cond_stage_model.tokenizer.batch_decode(
+                        c["c_crossattn"][0], skip_special_tokens=True
+                    )
+                else:
+                    text = c
+                    
+                # 计算CLIP分数
+                clip_score = self.compute_clip_similarity(samples, text)
+                if clip_score is not None:
+                    self.log("val/clip_score", clip_score,
+                            prog_bar=True, logger=True, on_step=True, on_epoch=True,
+                            sync_dist=True)
+            except Exception as e:
+                print(f"Error in validation_step: {e}")
+                import traceback
+                traceback.print_exc()
+                
         self.log_dict(loss_dict_no_ema, prog_bar=False, logger=True, on_step=False, on_epoch=True)
         self.log_dict(loss_dict_ema, prog_bar=False, logger=True, on_step=False, on_epoch=True)
 
@@ -1205,7 +1234,7 @@ class LatentDiffusion(DDPM):
                 img_orig = self.q_sample(x0, ts)
                 img = img_orig * mask + (1. - mask) * img
 
-            if i % log_every_t == 0 or i == timesteps - 1:
+            if i % self.log_every_t == 0 or i == timesteps - 1:
                 intermediates.append(x0_partial)
             if callback: callback(i)
             if img_callback: img_callback(img, i)
@@ -1440,6 +1469,53 @@ class LatentDiffusion(DDPM):
         x = nn.functional.conv2d(x, weight=self.colorize)
         x = 2. * (x - x.min()) / (x.max() - x.min()) - 1.
         return x
+
+    def compute_clip_similarity(self, generated_images, text_prompts):
+        """计算生成图像和文本提示之间的CLIP相似度"""
+        try:
+            # 确保CLIP模型存在
+            if not hasattr(self, 'clip_model'):
+                from transformers import CLIPProcessor, CLIPModel
+                self.clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(self.device)
+                self.clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+                self.clip_model.eval()
+                for param in self.clip_model.parameters():
+                    param.requires_grad = False
+
+            # 将生成的图像转换为CLIP期望的格式
+            if isinstance(generated_images, torch.Tensor):
+                generated_images = generated_images.to(self.device)
+                images = (generated_images + 1) * 0.5  # [-1,1] -> [0,1]
+                images = [transforms.ToPILImage()(img.cpu()) for img in images]
+
+            # 确保文本提示是字符串列表
+            if isinstance(text_prompts, (list, tuple)):
+                text_inputs = text_prompts
+            elif isinstance(text_prompts, str):
+                text_inputs = [text_prompts]
+            else:
+                text_inputs = [str(text_prompts)]
+
+            # 使用CLIP processor处理输入
+            inputs = self.clip_processor(
+                images=images,
+                text=text_inputs,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+            ).to(self.device)
+
+            # 计算相似度
+            with torch.no_grad():
+                outputs = self.clip_model(**inputs)
+                similarity = outputs.logits_per_image.mean()
+
+            return similarity.item()  # 确保返回Python标量
+        except Exception as e:
+            print(f"Error in compute_clip_similarity: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
 
 class DiffusionWrapper(pl.LightningModule):
