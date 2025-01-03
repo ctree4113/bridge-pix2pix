@@ -75,7 +75,7 @@ class MagicBrushDataset(Dataset):
             source_img = self.custom_transform(source_img)
             target_img = self.custom_transform(target_img)
             mask_img = self.custom_transform(mask_img)
-
+            
         # 处理文本指令
         instruction = item['instruction']
         if not instruction:
@@ -84,7 +84,7 @@ class MagicBrushDataset(Dataset):
         # 确保指令是字符串
         if isinstance(instruction, (list, tuple)):
             instruction = " ".join(instruction)
-
+        
         # 返回 ldm 格式的数据
         return {
             "edited": target_img,  # 目标图像
